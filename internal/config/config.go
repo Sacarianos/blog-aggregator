@@ -49,10 +49,10 @@ func Read() (Config, error) {
 
 func (cfg *Config) SetUser(userName string) error {
 	cfg.CurrentUserName = userName
-	return write(*cfg)
+	return Write(*cfg)
 }
 
-func write(cfg Config) error {
+func Write(cfg Config) error {
 	path, err := getConfigFilePath()
 	if err != nil {
 		return err
