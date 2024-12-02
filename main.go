@@ -1,81 +1,64 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
 
 	"github.com/Sacarianos/blog-aggregator/internal/config"
+	"github.com/Sacarianos/blog-aggregator/internal/database"
+
+	_ "github.com/lib/pq"
 )
 
 type state struct {
+	db  *database.Queries
 	cfg *config.Config
-}
-
-type command struct {
-	name string
-	args []string
-}
-
-func handlerLogin(s *state, cmd command) error {
-	if len(cmd.args) == 0 {
-		return fmt.Errorf("login requires a username argument")
-	}
-	username := cmd.args[0]
-	s.cfg.CurrentUserName = username
-	// Write the updated config to disk
-
-	if err := config.Write(*s.cfg); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
-	}
-
-	fmt.Printf("User has been set to: %s\n", username)
-	return nil
-}
-
-type commands struct {
-	handlers map[string]func(*state, command) error
-}
-
-func (c *commands) register(name string, f func(*state, command) error) {
-	if c.handlers == nil {
-		c.handlers = make(map[string]func(*state, command) error)
-	}
-	c.handlers[name] = f
-}
-
-func (c *commands) run(s *state, cmd command) error {
-	if handler, exists := c.handlers[cmd.name]; exists {
-		return handler(s, cmd)
-	}
-	return fmt.Errorf("unknown command: %s", cmd.name)
 }
 
 func main() {
 	cfg, err := config.Read()
 	if err != nil {
-		log.Fatalf("Failed to read config: %v", err)
+		log.Fatalf("error reading config: %v", err)
 	}
 
-	// Initialize state
-	appState := &state{cfg: &cfg}
+	db, err := sql.Open("postgres", cfg.DBURL)
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	defer db.Close()
+	dbQueries := database.New(db)
 
-	cmds := &commands{}
+	programState := &state{
+		db:  dbQueries,
+		cfg: &cfg,
+	}
 
+	cmds := commands{
+		registeredCommands: make(map[string]func(*state, command) error),
+	}
 	cmds.register("login", handlerLogin)
+	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerListFeeds)
+	cmds.register("follow", handlerFollow)
+	cmds.register("following", handlerFollowing)
+	cmds.register("following", handlerListFeedFollows)
 
 	if len(os.Args) < 2 {
-		fmt.Println("Not enough arguments. Usage: gator <command> [args]")
-		os.Exit(1)
+		fmt.Println("Usage: cli <command> [args...]")
+		return
 	}
 
 	cmdName := os.Args[1]
 	cmdArgs := os.Args[2:]
-	cmd := command{name: cmdName, args: cmdArgs}
 
-	if err := cmds.run(appState, cmd); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+	err = cmds.run(programState, command{Name: cmdName, Args: cmdArgs})
+	if err != nil {
+		log.Fatal(err)
 	}
-
 }
